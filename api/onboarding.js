@@ -8,9 +8,9 @@ const getH = () => ({
   'Content-Type': 'application/json'
 });
 const DB = {
-  CLINICAS: 'bfbaf930-3746-42e7-b52c-6a819cd9264f',
-  COBRANZA: '76bcf3a2-71c8-456a-bcd8-a9de22d30447',
-  CANALES:  '74578322-6cb5-463d-b0fb-3084c43b2e6c'
+  CLINICAS: '16178dfd-fa7e-4b5a-884d-445cb1041f6a',
+  COBRANZA: 'c4b90d4f-2652-4530-a7fe-5fcd5957ab9e',
+  CANALES:  '9caf13e3-f135-4ffe-9d9c-a7616bfc2642'
 };
 
 module.exports = async function handler(req, res) {

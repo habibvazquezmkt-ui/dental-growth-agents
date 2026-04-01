@@ -1,7 +1,7 @@
 {
   "version": 2,
   "crons": [
-    { "path": "/api/agente-cobros", "schedule": "0 15 * * *" },
+    { "path": "/api/agente-cobros", "schedule": "0 14 * * *" },
     { "path": "/api/agente-monitor", "schedule": "0 15 * * 1" }
   ]
 }

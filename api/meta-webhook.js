@@ -9,14 +9,15 @@
  * 4. Notifica en Slack con los datos del lead
  *
  * Compatible con el ecosistema existente (lib/notion.js, lib/slack.js)
+ * Usa las env vars existentes: FACEBOOK_VERIFY_TOKEN, FACEBOOK_PAGE_ACCESS_TOKEN, etc.
  */
 
 const { enviarMensaje } = require('../lib/slack');
 
-// --- Config ---
+// --- Config (usa las env vars que ya existen en Vercel) ---
 const NOTION_API = 'https://api.notion.com/v1';
-const META_VERIFY_TOKEN = process.env.META_VERIFY_TOKEN || 'dental_growth_verify_2026';
-const META_ACCESS_TOKEN = process.env.META_ACCESS_TOKEN || '';
+const VERIFY_TOKEN = process.env.FACEBOOK_VERIFY_TOKEN || process.env.META_VERIFY_TOKEN || 'dental_growth_verify_2026';
+const ACCESS_TOKEN = process.env.FACEBOOK_PAGE_ACCESS_TOKEN || process.env.META_ACCESS_TOKEN || '';
 const PIPELINE_DB_ID = process.env.NOTION_PIPELINE_DB_ID || '279f5e57-2262-4451-a103-7d0e1de3a70c';
 const FORM_REGISTRY_DB_ID = process.env.NOTION_FORM_REGISTRY_DB_ID || 'd4cad324-29e8-4cd8-bd2b-0d2f311e171d';
 const LEADS_CHANNEL_ID = process.env.SLACK_LEADS_CHANNEL_ID || '';
@@ -39,7 +40,7 @@ async function fetchWithRetry(url, options, maxRetries = 3) {
       const resp = await fetch(url, options);
       if (resp.status < 500) return resp;
     } catch (e) {
-      console.warn(`Intento ${attempt + 1}/${maxRetries} fallÃ³: ${e.message}`);
+      console.warn(`Intento ${attempt + 1}/${maxRetries} fallo: ${e.message}`);
     }
     if (attempt < maxRetries - 1) {
       await new Promise(r => setTimeout(r, 2 ** attempt * 1000));
@@ -49,7 +50,7 @@ async function fetchWithRetry(url, options, maxRetries = 3) {
 }
 
 async function getMetaLeadData(leadgenId) {
-  const url = `https://graph.facebook.com/v19.0/${leadgenId}?access_token=${META_ACCESS_TOKEN}`;
+  const url = `https://graph.facebook.com/v19.0/${leadgenId}?access_token=${ACCESS_TOKEN}`;
   const resp = await fetchWithRetry(url, { method: 'GET' });
   if (resp && resp.ok) return resp.json();
   console.error(`Error obteniendo lead ${leadgenId}: ${resp?.status || 'sin respuesta'}`);
@@ -96,7 +97,7 @@ async function getFormMetadata(formId) {
       const props = results[0].properties || {};
       return {
         nombre_form: props['Nombre Form']?.title?.[0]?.plain_text || '',
-        campana: props['CampaÃ±a']?.rich_text?.[0]?.plain_text || '',
+        campana: props['Campana']?.rich_text?.[0]?.plain_text || '',
         tratamiento: props['Tratamiento']?.select?.name || '',
         fuente: props['Fuente']?.select?.name || '',
         closer_id: props['Closer Asignado']?.relation?.[0]?.id || '',
@@ -109,7 +110,7 @@ async function getFormMetadata(formId) {
 
 async function checkDuplicate(phone, email) {
   const filters = [];
-  if (phone) filters.push({ property: 'TelÃ©fono', phone_number: { equals: phone } });
+  if (phone) filters.push({ property: 'Telefono', phone_number: { equals: phone } });
   if (email) filters.push({ property: 'Email', email: { equals: email } });
   if (filters.length === 0) return false;
 
@@ -145,7 +146,7 @@ async function createPipelineRecord(lead, formMeta) {
 
     const parts = [];
     if (formMeta.nombre_form) parts.push(`Form: ${formMeta.nombre_form}`);
-    if (formMeta.campana) parts.push(`CampaÃ±a: ${formMeta.campana}`);
+    if (formMeta.campana) parts.push(`Campana: ${formMeta.campana}`);
     if (formMeta.tratamiento) parts.push(`Tratamiento: ${formMeta.tratamiento}`);
     if (formMeta.notas) parts.push(formMeta.notas);
     notasExtra = parts.join(' | ');
@@ -158,11 +159,11 @@ async function createPipelineRecord(lead, formMeta) {
     'Fecha Primer Contacto': { date: { start: today } },
     'Valor Mensual': { number: DEFAULT_VALOR_MENSUAL },
     'Closer': { relation: [{ id: closerId }] },
-    'Notas': { rich_text: [{ text: { content: `Lead automÃ¡tico desde Meta Ads. ${notasExtra}`.trim() } }] },
+    'Notas': { rich_text: [{ text: { content: `Lead automatico desde Meta Ads. ${notasExtra}`.trim() } }] },
   };
 
   if (lead.email) properties['Email'] = { email: lead.email };
-  if (lead.phone) properties['TelÃ©fono'] = { phone_number: lead.phone };
+  if (lead.phone) properties['Telefono'] = { phone_number: lead.phone };
 
   const resp = await fetchWithRetry(
     `${NOTION_API}/pages`,
@@ -189,7 +190,7 @@ async function createPipelineRecord(lead, formMeta) {
 
 async function notifySlack(lead, pageId, formMeta) {
   if (!LEADS_CHANNEL_ID) {
-    console.warn('SLACK_LEADS_CHANNEL_ID no configurado, saltando notificaciÃ³n');
+    console.warn('SLACK_LEADS_CHANNEL_ID no configurado, saltando notificacion');
     return;
   }
 
@@ -212,15 +213,15 @@ async function notifySlack(lead, pageId, formMeta) {
     formInfo = parts.join(' | ');
   }
 
-  let text = `ð #Neuvo Lead desde Meta Ads*\n\n`;
-  text += `ð¨ââ¥ï¸ *${lead.name || 'Sin nombre'}*\n`;
-  text += `ð Tel: ${lead.phone || 'â'}\n`;
-  text += `ð§ Email: ${lead.email || 'â'}\n`;
-  if (formInfo) text += `ð Formulario: ${formInfo}\n`;
-  text += `ð Fecha: ${fecha}\n\n`;
-  text += `ð¤ Asignado a: Damina\n`;
-  text += `ð° Valor estimado: $5,000 MXN/mes\n`;
-  if (notionLink) text += `\nâ <${notionLink}|Ver en Notion>`;
+  let text = `*Nuevo Lead desde Meta Ads*\n\n`;
+  text += `*${lead.name || 'Sin nombre'}*\n`;
+  text += `Tel: ${lead.phone || '---'}\n`;
+  text += `Email: ${lead.email || '---'}\n`;
+  if (formInfo) text += `Formulario: ${formInfo}\n`;
+  text += `Fecha: ${fecha}\n\n`;
+  text += `Asignado a: Damina\n`;
+  text += `Valor estimado: $5,000 MXN/mes\n`;
+  if (notionLink) text += `\n<${notionLink}|Ver en Notion>`;
 
   await enviarMensaje(LEADS_CHANNEL_ID, text);
 }
@@ -257,7 +258,7 @@ async function processLeads(data) {
       if (formMeta) {
         console.log(`Form registry encontrado: ${formMeta.nombre_form}`);
       } else {
-        console.log(`Form ${formId} no estÃ¡ en el registry â usando defaults`);
+        console.log(`Form ${formId} no esta en el registry, usando defaults`);
       }
 
       // 3. Verificar duplicados
@@ -275,7 +276,7 @@ async function processLeads(data) {
         await notifySlack(lead, pageId, formMeta);
       }
 
-      console.log(`Lead procesado: ${lead.name} â Pipeline + Slack â`);
+      console.log(`Lead procesado: ${lead.name} -> Pipeline + Slack OK`);
     }
   }
 }
@@ -283,17 +284,17 @@ async function processLeads(data) {
 // === HANDLER PRINCIPAL (Vercel Serverless) ===
 
 module.exports = async function handler(req, res) {
-  // --- GET: VerificaciÃ³n de Meta ---
+  // --- GET: Verificacion de Meta ---
   if (req.method === 'GET') {
     const mode = req.query['hub.mode'];
     const token = req.query['hub.verify_token'];
     const challenge = req.query['hub.challenge'];
 
-    if (mode === 'subscribe' && token === META_VERIFY_TOKEN) {
+    if (mode === 'subscribe' && token === VERIFY_TOKEN) {
       console.log('Webhook verificado correctamente');
       return res.status(200).send(challenge);
     } else {
-      console.warn(`VerificaciÃ³n fallida: mode=${mode}, token=${token}`);
+      console.warn(`Verificacion fallida: mode=${mode}, token=${token}`);
       return res.status(403).send('Forbidden');
     }
   }
@@ -302,7 +303,7 @@ module.exports = async function handler(req, res) {
   if (req.method === 'POST') {
     const data = req.body;
 
-    // Responder 200 inmediatamente (Meta requiere respuesta rÃ¡pida)
+    // Responder 200 inmediatamente (Meta requiere respuesta rapida)
     res.status(200).json({ status: 'ok' });
 
     // Procesar leads en background
@@ -314,6 +315,6 @@ module.exports = async function handler(req, res) {
     return;
   }
 
-  // Otros mÃ©todos
+  // Otros metodos
   return res.status(405).json({ error: 'Method not allowed' });
 };

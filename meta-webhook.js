@@ -1,12 +1,13 @@
 /**
- * Meta Lead Ads â Notion Pipeline + Slack
+ * Meta Lead Ads → Notion Pipeline + Slack
  * Webhook para Dental Growth
  *
  * Recibe leads de Meta Instant Forms y:
  * 1. Busca el formulario en el Form Registry de Notion (multi-form support)
- * 2. Verifica duplicados en Pipeline por telÃ©fono/email
- * 3. Crea registro en Pipeline de Ventas con metadata del form
- * 4. Notifica en Slack con los datos del lead
+ * 2. Si no existe, auto-registra el formulario nuevo en el registry
+ * 3. Verifica duplicados en Pipeline por telefono/email
+ * 4. Crea registro en Pipeline de Ventas con metadata del form
+ * 5. Notifica en Slack con los datos del lead
  *
  * Compatible con el ecosistema existente (lib/notion.js, lib/slack.js)
  * Usa las env vars existentes: FACEBOOK_VERIFY_TOKEN, FACEBOOK_PAGE_ACCESS_TOKEN, etc.
@@ -106,6 +107,69 @@ async function getFormMetadata(formId) {
     }
   }
   return null;
+}
+
+// === AUTO-REGISTRO DE FORMULARIOS NUEVOS ===
+
+async function getMetaFormName(formId) {
+  const url = `https://graph.facebook.com/v19.0/${formId}?fields=name,status,created_time,page_id&access_token=${ACCESS_TOKEN}`;
+  const resp = await fetchWithRetry(url, { method: 'GET' });
+  if (resp && resp.ok) return resp.json();
+  console.warn(`No se pudo obtener info del form ${formId} desde Meta`);
+  return null;
+}
+
+async function autoRegisterForm(formId) {
+  if (!FORM_REGISTRY_DB_ID || !formId) return null;
+
+  // Obtener nombre y metadata del form desde Meta Graph API
+  const metaForm = await getMetaFormName(formId);
+  const formName = metaForm?.name || `Form ${formId}`;
+  const createdTime = metaForm?.created_time
+    ? metaForm.created_time.split('T')[0]
+    : new Date().toISOString().split('T')[0];
+
+  console.log(`Auto-registrando formulario nuevo: ${formName} (${formId})`);
+
+  const properties = {
+    'Nombre Form': { title: [{ text: { content: formName } }] },
+    'Meta Form ID': { rich_text: [{ text: { content: String(formId) } }] },
+    'Status': { select: { name: 'Activo' } },
+    'Fuente': { select: { name: 'Facebook Ads' } },
+    'Tratamiento': { select: { name: 'General' } },
+    'Fecha Creacion': { date: { start: createdTime } },
+    'Leads Recibidos': { number: 1 },
+    'Notas': { rich_text: [{ text: { content: 'Auto-registrado por webhook al recibir primer lead' } }] },
+  };
+
+  const resp = await fetchWithRetry(
+    `${NOTION_API}/pages`,
+    {
+      method: 'POST',
+      headers: getNotionHeaders(),
+      body: JSON.stringify({
+        parent: { database_id: FORM_REGISTRY_DB_ID },
+        properties,
+      })
+    }
+  );
+
+  if (resp && resp.ok) {
+    const page = await resp.json();
+    console.log(`Form auto-registrado en Notion: ${formName} (${page.id})`);
+    return {
+      nombre_form: formName,
+      campana: '',
+      tratamiento: 'General',
+      fuente: 'Facebook Ads',
+      closer_id: '',
+      notas: 'Auto-registrado por webhook',
+    };
+  } else {
+    const err = resp ? await resp.text() : 'sin respuesta';
+    console.error(`Error auto-registrando form: ${err}`);
+    return null;
+  }
 }
 
 async function checkDuplicate(phone, email) {
@@ -254,11 +318,18 @@ async function processLeads(data) {
       const lead = parseLeadFields(fieldData);
 
       // 2. Buscar metadata del formulario en el registry
-      const formMeta = await getFormMetadata(String(formId));
+      let formMeta = await getFormMetadata(String(formId));
       if (formMeta) {
         console.log(`Form registry encontrado: ${formMeta.nombre_form}`);
       } else {
-        console.log(`Form ${formId} no esta en el registry, usando defaults`);
+        // Auto-registrar formulario nuevo en Notion Form Registry
+        console.log(`Form ${formId} no esta en el registry, auto-registrando...`);
+        formMeta = await autoRegisterForm(formId);
+        if (formMeta) {
+          console.log(`Form auto-registrado: ${formMeta.nombre_form}`);
+        } else {
+          console.log(`No se pudo auto-registrar form ${formId}, usando defaults`);
+        }
       }
 
       // 3. Verificar duplicados

@@ -373,16 +373,19 @@ module.exports = async function handler(req, res) {
   if (req.method === 'POST') {
     const data = req.body;
 
-    // Responder 200 inmediatamente (Meta requiere respuesta rapida)
-    res.status(200).json({ status: 'ok' });
+    console.log(`Webhook POST recibido: ${JSON.stringify(data).substring(0, 300)}`);
 
-    // Procesar leads en background
+    // Procesar leads PRIMERO, antes de enviar respuesta
+    // IMPORTANTE: Vercel termina la funcion despues de res.end(), matando procesamiento background
     try {
       await processLeads(data);
+      console.log('Procesamiento completado exitosamente');
     } catch (e) {
       console.error(`Error procesando leads: ${e.message}`);
     }
-    return;
+
+    // Responder 200 DESPUES de procesar (Meta da ~20s de margen)
+    return res.status(200).json({ status: 'ok' });
   }
 
   // Otros metodos
